@@ -34,7 +34,7 @@ else if (log1.timeJoin > log2.timeJoin && log1.timeJoin < log2.timeLeave && log1
 else{return false}
 },
 //call this function after guildMap has already been loaded or it will not work
-getFriends:function (id, guildid,thisGuild) {
+getFriends:function (id,guildid,thisGuild) {
         class timeLog {
             user: string;
 
