@@ -1,30 +1,18 @@
 //fs is needed for the import/export of files
 const Discord = require('discord.js');
 const fs = require('fs')
-const lodash = require('lodash');
 //for scheduling log exports
+const mongoose = require("mongoose")
 const schedule = require('node-schedule');
 //these 3 are dependensies for node-schedule
-const sorted = require('sorted-array-functions');
-const parser = require('cron-parser');
-const lt = require('long-timeout')
-//
-const emojiFilter = (reaction, user) => reaction.emoji.name === "❤"||"💛"||'💚'||"💙"||"💜"||"💖";
-var emoji = ["❤","💛",'💚',"💙","💜","💖"]
-const fsmi = require('fs-minipass')
-const MiniPass = require('minipass')
-const yallist = require('yallist')
-const mkdirp = require('mkdirp');
-const fsm = require('fs-minipass')
-const {Pool} = require("better-sqlite-pool");
-const Buffersafe = require('safe-buffer').Buffer
+const mongodb = require('mongodb')
 const client = new Discord.Client();
-
+var Enmap = require("enmap");
 var usersActive = [];
-
+var botFunctions = require("./commands/other/botFunctions.js");
 const config = require("./config.json");
 client.config = config;
-var Integer = require('integer');
+
 var finishedVoiceLogs = [];
 //the location of the voiceLogs
 var voiceLogDir = './botfiles/voicelogs/'
@@ -40,7 +28,7 @@ var guildMap = new Enmap({
     autoFetch: true,
     fetchAll: true,
 });
-
+var mClient
 
 module.exports.guildMap = guildMap
 
@@ -57,8 +45,8 @@ class userInVoiceChannel {
 }
 
 class party {
-  id:string;
-  members = []
+    id: string;
+    members = []
 }
 
 
@@ -70,7 +58,7 @@ class completeLog {
     timeJoin: number;
     timeLeave: number;
     totalTime = this.timeLeave - this.timeJoin;
-    guildid: string;
+    guild: string;
 
 }
 //represents each guild
@@ -81,53 +69,67 @@ class guildObject {
     messageLogs = []
 
 }
-class emojiRole{
-  emoji:any;
-  role:string;
-  name:string;
+class emojiRole {
+    emoji: any;
+    role: string;
+    name: string;
 }
 class messageLog {
-  guild:number;
-  time:number;
-  channel:number;
-  user:number;
-  mentions = []
+    guild: string;
+    time: number;
+    channel: number;
+    user: number;
+    mentions = []
 }
 
 //automatically exports/imports voiceLogs using node-scheduler
-var exportImport = schedule.scheduleJob('0 58 * * * *', function() {
-    moveLogsToDB(guilds)
+var exportImport = schedule.scheduleJob('*/1 * * * *', function() {
+    moveLogsToDB()
 });
 
+function checkOfflineVoice(guild) {
+    let guildMembers = guild.members
+    for (let thisMember of guildMembers) {
+        if (thisMember.voiceChannel) {
+            createPartialLog(thisMember)
+        }
+    }
+}
 
 //finds the join log of a member that goes offline, returns the log and removes it from the online user list
 function findMatchingLog(id) {
-    for (let x in usersActive) {
-        let splicespot = 0;
-        if (usersActive[x].id === id) {
-
-            let logToReturn = usersActive[x];
-            let discard = usersActive.splice(splicespot, 1)
-            return logToReturn;
-        }
-        splicespot++
-    }
+    return usersActive.splice(usersActive.indexOf(usersActive.find(function(user) {
+        return user.id === id
+    })), 1)
 }
 //takes the partial log and converts to a complete log
-function createFinalLog(partialLog) {
-  if(partialLog){
-    let time = new Date()
-    let timeMili = time.getTime();
-    let log = new completeLog;
-    log.userid = partialLog.id;
-    log.voiceChannel = partialLog.voiceChannel;
-    log.voiceChannelid = partialLog.voiceChannelid;
-    log.timeJoin = partialLog.timeJoin;
-    log.guildid = partialLog.guildid;
-    log.userName = partialLog.userName;
-    log.timeLeave = timeMili;
-    sortLogsIntoGuildObject(log);
-}}
+function createFinalLog(smallLog) {
+    if (smallLog) {
+      let otherLog = smallLog[0]
+
+        let time = new Date()
+        let timeMili = time.getTime();
+
+
+        let finalLog = new completeLog;
+
+        finalLog.userid = otherLog.id;
+        finalLog.voiceChannel = otherLog.voiceChannel;
+        finalLog.voiceChannelid = otherLog.voiceChannelid;
+        finalLog.timeJoin = otherLog.timeJoin;
+        finalLog.guild = otherLog.guildid;
+        finalLog.userName = otherLog.userName;
+        finalLog.timeLeave = timeMili;
+        console.log(finalLog)
+        let thisGuild = guilds.find(function(guild) {
+            return guild.guildid === finalLog.guild
+        })
+
+
+        thisGuild.guildLogs.push(finalLog)
+        console.log(thisGuild.guildLogs.length)
+    }
+}
 //checks whether its a user coming online or going offline, returns 0-3 depending on the change
 //0 is a mute/unmute, should be ignored
 //1 is a channel change
@@ -151,8 +153,20 @@ function checkChange(oldMember, newMember) {
         return 3
     }
 }
-//used by getAllUsers
 
+function createPartialLog(newMember) {
+    let thisLog = new userInVoiceChannel
+    let time = new Date()
+    thisLog.userName = newMember.userName;
+    thisLog.id = newMember.id;
+    thisLog.voiceChannel = newMember.voiceChannel.name;
+    thisLog.voiceChannelid = newMember.voiceChannel.id;
+    thisLog.timeJoin = time.getTime();
+    thisLog.guildid = newMember.guild.id;
+    usersActive.push(thisLog)
+
+
+}
 //fetches list of all members to check for anyone online as of the bot turning on
 function getAllUsers() {
     let allGuilds = client.guilds.array();
@@ -166,31 +180,48 @@ function getAllUsers() {
 
     }
 }
-//moves the logs from the temporary memory to SQLite map
-function moveLogsToDB(guildArray) {
-    guildMap.defer.then(() => {
-        for (var x of guildArray) {
-            let fetchid = x.guildid;
-            let offlineLogs = x.guildLogs;
-            let offlineMessageLogs = x.messageLogs
+function connectToMongo(){
+  var MongoClient = require('mongodb').MongoClient;
 
-            //this line is to trick the typescript compiler because it bugs out ignore it
-            let guildLogs
+   mClient = new MongoClient(config.uri, {
+      useNewUrlParser: true
+  });
+  mClient.connect(function(err){
+    if(err){throw err}
+  })
+}
+//moves the logs from the temporary memory to remote mongodb
+function moveLogsToDB() {
 
-            let currentDBGuild = guildMap.get(fetchid)
 
 
 
-            currentDBGuild.guildLogs = currentDBGuild.guildLogs.concat(offlineLogs)
-            currentDBGuild.messageLogs = currentDBGuild.messageLogs.concat(offlineMessageLogs)
-            guildMap.set(fetchid, currentDBGuild)
-            x.guildLogs = []
-            x.messageLogs = []
+        for (let guild of guilds) {
+            let dbo = mClient.db(guild.guildid)
+            if (guild.guildLogs.length > 0) {
+
+                dbo.collection("voiceLogs").insertMany(guild.guildLogs, function(err, res) {
+                    if (err) throw err;
+                    console.log(`inserted ${res.insertedCount} voiceLogs`);
+
+
+                })
+                guild.guildLogs = []
+            }
+            if (guild.messageLogs.length > 0) {
+                dbo.collection("messageLogs").insertMany(guild.messageLogs, function(err, res) {
+                    if (err) throw err;
+                    console.log(`inserted ${res.insertedCount} messageLogs`);
+
+                })
+            }
+            guild.messageLogs = []
+
         }
-    })
+
 }
 //creates the guild objects on startup
-createGuildObjects function createGuildObjects() {
+function createGuildObjects() {
     var guildArray = client.guilds.array();
     for (let x of guildArray) {
         var newGuild = new guildObject;
@@ -199,68 +230,59 @@ createGuildObjects function createGuildObjects() {
 
     }
 
-},
-function createMessageLog(message){
-  let mentions = []
-  let thisLog = new messageLog;
-  thisLog.time = message.createdTimestamp;
-  thisLog.user = message.author.id
-  thisLog.channel = message.channel.id
+}
 
-  thisLog.guild = message.guild.id;
-  let mentionObjs = message.mentions.roles.array()
-  if(mentionObjs){
-    for(let mention of mentionObjs){
-      mentions.push(mention.name)
+function createMessageLog(message) {
+    let mentions = []
+    let thisLog = new messageLog;
+    thisLog.time = message.createdTimestamp;
+    thisLog.user = message.author.id
+    thisLog.channel = message.channel.id
+
+    thisLog.guild = message.guild.id;
+    let mentionObjs = message.mentions.roles.array()
+    if (mentionObjs) {
+        for (let mention of mentionObjs) {
+            mentions.push(mention.name)
+        }
     }
-  }
-  thisLog.mentions = mentions
- sortmessageLogsIntoGuildObject(thisLog)
+    thisLog.mentions = mentions
+    let thisGuild = guilds.find(function(guild) {
+        return guild.guildid === thisLog.guild
+    })
+    thisGuild.messageLogs.push(thisLog)
 }
 client.config = config;
 
 fs.readdir("./events/", (err, files) => {
-  if (err) return console.error(err);
-  files.forEach(file => {
-    const event = require(`./events/${file}`);
-    let eventName = file.split(".")[0];
-    client.on(eventName, event.bind(null, client));
-  });
+    if (err) return console.error(err);
+    files.forEach(file => {
+        const event = require(`./events/${file}`);
+        let eventName = file.split(".")[0];
+        client.on(eventName, event.bind(null, client));
+    });
 });
 
 client.commands = new Enmap();
 
 fs.readdir("./commands/", (err, files) => {
-  if (err) return console.error(err);
-  files.forEach(file => {
-    if (!file.endsWith(".js")) return;
-    let props = require(`./commands/${file}`);
-    let commandName = file.split(".")[0];
-    console.log(`Attempting to load command ${commandName}`);
-    client.commands.set(commandName, props);
-  });
+    if (err) return console.error(err);
+    files.forEach(file => {
+        if (!file.endsWith(".js")) return;
+        let props = require(`./commands/${file}`);
+        let commandName = file.split(".")[0];
+        console.log(`Attempting to load command ${commandName}`);
+        client.commands.set(commandName, props);
+    });
 });
-client.login(config.testtoken);
+client.login(config.token);
 //startup procedures
 client.on('ready', () => {
     console.log('we in')
+    connectToMongo()
     getAllUsers();
     createGuildObjects();
-    guildMap.defer.then(() => {
-        for (var x of guilds) {
-            var stringid = x.guildid.toString()
 
-
-            if (!guildMap.has(stringid)) {
-                console.log('new guild in db')
-                guildMap.set(stringid, x);
-            } // works
-            var guildList = guildMap.get(stringid); // also works
-            console.log("guild:"+guildList.guildLogs.length)
-
-
-        }
-    });
 
 })
 //EVENTS
@@ -283,11 +305,7 @@ client.on('voiceStateUpdate', (oldMember, newMember) => {
 })
 //COMMANDS
 client.on('message', message => {
-createMessageLog(message);
-    if (message.author.bot) {
-        return
-    }
-
+        createMessageLog(message);
     }
 
 )

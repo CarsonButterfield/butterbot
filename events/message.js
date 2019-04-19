@@ -7,7 +7,7 @@ module.exports = (client, message) => {
   if (message.content.indexOf(client.config.testprefix) !== 0 && message.content.indexOf(client.config.rolePrefix)!== 0) return;
 
   // Our standard argument/command name definition.
-  if(message.content.indexOf(client.config.testprefix) === 0){
+  if(message.content.indexOf(client.config.prefix) === 0){
    args = message.content.slice(client.config.prefix.length).trim().split(/ +/g)}
   else( args = message.content.slice(client.config.rolePrefix.length).trim().split(/ +/g))
   const command = args.shift().toLowerCase();
@@ -19,5 +19,5 @@ module.exports = (client, message) => {
   if (!cmd) return;
 
   // Run the command
-  cmd.run(client, message, args);
+//  cmd.run(client, message, args);
 };
