@@ -1,2 +1,3 @@
 # butterbot3
-Completely Reorganized butterbot
+
+This is an outdated, archived version of butterbot, it has a lot of weirdness because I built it before I started my formal education at General Assembly
