@@ -22,7 +22,7 @@
     "integer": "^2.1.0",
     "lodash": "^4.17.11",
     "long-timeout": "^0.1.1",
-    "minimist": "^1.2.0",
+    "minimist": "^1.2.2",
     "minipass": "^2.3.5",
     "minizlib": "^1.2.1",
     "mkdirp": "^0.5.1",
